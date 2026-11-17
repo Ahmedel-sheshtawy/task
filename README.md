@@ -1,6 +1,6 @@
-# Sara Essam — Web Platform
+# الحلم حقيقة — Web Platform
 
-Cloudflare-first web migration of the existing Sara Essam app.
+Cloudflare-first web migration of the existing الحلم حقيقة app.
 
 ## Included in this first migration baseline
 - Existing Arabic RTL application interface copied into `public/index.html`.
@@ -15,11 +15,11 @@ The legacy interface still stores its personal app state in browser `localStorag
 ## Setup
 1. Create a GitHub repository and upload this project.
 2. Install Node.js LTS, then run `npm install`.
-3. Create D1 database: `npx wrangler d1 create sara-essam-db`.
+3. Create D1 database: `npx wrangler d1 create el-helm-haqeqa-db`.
 4. Copy the returned database ID into `wrangler.jsonc` replacing `REPLACE_WITH_D1_DATABASE_ID`.
-5. Apply schema locally: `npx wrangler d1 migrations apply sara-essam-db --local`.
+5. Apply schema locally: `npx wrangler d1 migrations apply el-helm-haqeqa-db --local`.
 6. Start locally: `npm run dev`.
-7. Apply remotely: `npx wrangler d1 migrations apply sara-essam-db --remote`.
+7. Apply remotely: `npx wrangler d1 migrations apply el-helm-haqeqa-db --remote`.
 8. Deploy: `npm run deploy`.
 
 ## API

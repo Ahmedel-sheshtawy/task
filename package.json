@@ -1,15 +1,15 @@
 {
-  "name": "sara-essam-web",
+  "name": "el-helm-haqeqa",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.45.0"
   }
