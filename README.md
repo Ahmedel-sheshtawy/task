@@ -1,6 +1,6 @@
 # الحلم حقيقة — Web Platform
 
-Cloudflare-first web migration of the existing الحلم حقيقة app.
+Cloudflare-first web platform for الحلم حقيقة.
 
 ## Included in this first migration baseline
 - Existing Arabic RTL application interface copied into `public/index.html`.
@@ -10,7 +10,7 @@ Cloudflare-first web migration of the existing الحلم حقيقة app.
 - `/api/health` endpoint.
 
 ## Important current limitation
-The legacy interface still stores its personal app state in browser `localStorage`. D1 tables and room realtime foundation are prepared, but account authentication, secure cloud-state sync, project collaboration UI, and observer invite-token authorization are not yet wired. Do not treat this baseline as production-ready or expose private observer links until those layers are implemented.
+Account registration/login and per-user D1 state persistence are now implemented. The browser keeps a local cache, but D1 is the source of truth after sign-in. Study room authorization, collaborative project membership, and observer invite-token authorization are still not implemented; do not expose private observer links until those layers are implemented.
 
 ## Setup
 1. Create a GitHub repository and upload this project.
@@ -20,7 +20,8 @@ The legacy interface still stores its personal app state in browser `localStorag
 5. Apply schema locally: `npx wrangler d1 migrations apply el-helm-haqeqa-db --local`.
 6. Start locally: `npm run dev`.
 7. Apply remotely: `npx wrangler d1 migrations apply el-helm-haqeqa-db --remote`.
-8. Deploy: `npm run deploy`.
+8. Apply the new auth/session migration remotely: `npx wrangler d1 migrations apply el-helm-haqeqa-db --remote`.
+9. Deploy: `npm run deploy`.
 
 ## API
 - `GET /api/health` — Worker and D1 health.
@@ -28,4 +29,4 @@ The legacy interface still stores its personal app state in browser `localStorag
 - `GET /api/rooms/:roomId?name=...` with WebSocket upgrade — join realtime room. Add `role=observer` for observer view (authorization is not yet implemented; keep private until token checks are added).
 
 ## Next implementation milestone
-Authentication + encrypted/session-based authorization, then cloud persistence and a migration/import flow from existing `sara_state` local data. After that, connect the Study Rooms and Observer screens to Durable Objects.
+Next: add rate limiting and account recovery, then connect Study Rooms, collaborative projects, and Observer invite-token authorization.
