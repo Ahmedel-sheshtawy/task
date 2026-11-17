@@ -1,0 +1,34 @@
+الحلم حقيقة — Registration + Login + D1 Persistence patch
+
+سبب المشكلة المؤكد:
+- public/index.html في GitHub يحتوي بالفعل على واجهة التسجيل ويستدعي:
+  POST /api/auth/register
+  POST /api/auth/login
+  POST /api/auth/logout
+  GET  /api/auth/me
+  GET/PUT /api/state
+- لكن src/index.ts المنشور على main كان يحتوي فقط على /api/health و /api/rooms.
+- لذلك الواجهة تظهر، لكن لا توجد API خلفية تنفذ إنشاء الحساب أو تسجيل الدخول.
+
+الملفات داخل هذا الإصلاح بمساراتها:
+1) src/index.ts: يضيف مسارات المصادقة والجلسات وحفظ/استرجاع الحالة من D1.
+2) migrations/0002_auth_sessions.sql: جدول جلسات الدخول. الملف موجود بالفعل في المستودع حسب فحص GitHub؛ أدرجناه للتأكد فقط ولا تعِد تطبيقه إذا كان Wrangler يقول إنه مطبّق.
+3) package.json + tsconfig.json: استخدام wrangler types بالطريقة الموصى بها من Cloudflare بدل workers-types بإصدار غير موجود.
+
+طريقة التطبيق:
+A. في GitHub repository task، استبدل src/index.ts فقط بمحتوى الملف الموجود هنا.
+B. تأكد أن migrations/0002_auth_sessions.sql موجود كما هو. لا تحذف أو تعدل 0001_initial.sql.
+C. حدّث package.json و tsconfig.json من هذه الحزمة إذا أردت تشغيل typecheck محليًا أو في CI.
+D. في Cloudflare D1 Console أو عبر Wrangler، نفّذ migration على قاعدة el-helm-haqeqa-db مرة واحدة فقط:
+   npx wrangler d1 migrations apply el-helm-haqeqa-db --remote
+   إذا ظهرت رسالة أن كل migrations مطبقة بالفعل، فهذا طبيعي ولا تعِد تشغيل SQL يدويًا.
+E. اعمل Commit على main وانتظر نشر Worker.
+
+اختبار بعد النشر:
+1. افتح /api/health ويجب أن يظهر database=connected و authentication=enabled.
+2. افتح الموقع واضغط إنشاء حساب جديد. يجب أن يظهر حقل الاسم، ثم أدخل الاسم والبريد وكلمة مرور من 8 أحرف على الأقل.
+3. عند نجاح التسجيل ينتقل التطبيق للواجهة الرئيسية.
+4. أنشئ مهمة ثم حدّث الصفحة. يجب أن تبقى المهمة.
+
+لا تنشئ قاعدة D1 جديدة، ولا تغيّر database_id الموجود في wrangler.jsonc.
+لا تشارك Cloudflare API Token أو كلمات المرور في المحادثة.
