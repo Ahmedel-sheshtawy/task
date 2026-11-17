@@ -9,7 +9,8 @@ interface Env {
 
 const SESSION_COOKIE = '__Host-hh_session';
 const SESSION_DAYS = 30;
-const PBKDF2_ITERATIONS = 210_000;
+// Cloudflare Workers WebCrypto يرفض PBKDF2 بأكتر من 100,000 iteration
+const PBKDF2_ITERATIONS = 100_000;
 const MAX_STATE_BYTES = 256 * 1024;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}) {
@@ -49,7 +50,7 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 }
 async function passwordHashWithRounds(password: string, salt: Uint8Array, rounds: number): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Math.max(100_000, Math.min(500_000, rounds || PBKDF2_ITERATIONS)) }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Math.min(PBKDF2_ITERATIONS, rounds || PBKDF2_ITERATIONS) }, key, 256);
   return b64url(new Uint8Array(bits));
 }
 function cookieValue(request: Request, name: string): string | null {
@@ -61,10 +62,11 @@ function setSessionCookie(token: string, maxAge: number) {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 function clearSessionCookie() { return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`; }
+class BadRequest extends Error {}
 async function bodyJson(request: Request): Promise<any> {
   const len = Number(request.headers.get('content-length') || 0);
-  if (len > MAX_STATE_BYTES + 4096) throw new Error('حجم البيانات أكبر من المسموح');
-  return await request.json();
+  if (len > MAX_STATE_BYTES + 4096) throw new BadRequest('حجم البيانات أكبر من المسموح');
+  try { return await request.json(); } catch { throw new BadRequest('صيغة الطلب غير صحيحة'); }
 }
 async function currentUser(request: Request, env: Env) {
   const token = cookieValue(request, SESSION_COOKIE);
@@ -161,6 +163,7 @@ export default {
       }
       return env.ASSETS.fetch(request);
     } catch (error) {
+      if (error instanceof BadRequest) return json({ error: error.message }, 400);
       console.error('Worker request failed:', error);
       return json({ error: 'حدث خطأ داخلي. حاولي مرة أخرى.' }, 500);
     }
