@@ -5,9 +5,14 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
-    "lib": ["ES2022"],
-    "types": ["./worker-configuration.d.ts"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "worker-configuration.d.ts"
+  ]
 }
