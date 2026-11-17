@@ -11,8 +11,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "sara-essam-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_name": "el-helm-haqeqa-db",
+      "database_id": "b4a2e881-ea78-480b-a583-02f4b897c6b1",
       "migrations_dir": "migrations"
     }
   ],
