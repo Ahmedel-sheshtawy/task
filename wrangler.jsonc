@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "el-helm-haqeqa-v2-prod",
-      "database_id": "65a0175a-32f6-42f0-a49b-46a1343710ae",
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],

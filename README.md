@@ -1,3 +1,5 @@
+> **Important:** `wrangler.jsonc` currently contains a placeholder D1 `database_id`. Create a real D1 database and replace that value before deploying. Until then, registration, login, and cloud persistence cannot work. See `DEPLOY_STEPS_AR.md`.
+
 # الحلم حقيقة — الإصدار 2.0 (Clean Foundation)
 
 إعادة بناء مستقلة للمنصة. تم الاحتفاظ بتجربة التطبيق الحالية كمرحلة انتقالية، وفصل ملفات الواجهة، وإعادة ضبط المصادقة والحفظ السحابي. لا يرتبط هذا الإصدار بقاعدة D1 القديمة: أنشئ قاعدة جديدة ثم ضع معرّفها في `wrangler.jsonc`.

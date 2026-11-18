@@ -199,21 +199,29 @@ export default {
       if (url.pathname === '/api/health') {
         let database = 'unavailable';
         let schema = 'unknown';
+        let diagnostic = 'D1 binding is unavailable or not configured';
         try {
+          if (!env.DB) throw new Error('D1 binding DB is missing');
           await env.DB.prepare('SELECT 1').first();
           database = 'connected';
+          diagnostic = 'Database connection established';
           const [users, sessions, state] = await Promise.all([
             env.DB.prepare('PRAGMA table_info(users)').all<any>(),
             env.DB.prepare('PRAGMA table_info(auth_sessions)').all<any>(),
             env.DB.prepare('PRAGMA table_info(user_state)').all<any>()
           ]);
           const has = (result: any, name: string) => (result.results || []).some((column: any) => column.name === name);
-          schema = has(users, 'password_salt') && has(sessions, 'token_hash') && has(state, 'state_json')
-            ? 'ready' : 'migration_required';
+          const ready = has(users, 'id') && has(users, 'email') && has(users, 'password_hash') &&
+            has(users, 'password_salt') && has(sessions, 'token_hash') && has(sessions, 'expires_at') &&
+            has(state, 'user_id') && has(state, 'state_json');
+          schema = ready ? 'ready' : 'migration_required';
+          diagnostic = ready ? 'Database and authentication schema are ready' : 'Apply all D1 migrations before using registration';
         } catch (error) {
           console.error('Health check failed:', error);
+          diagnostic = String((error as any)?.message || 'Database connection failed').slice(0, 180);
         }
-        return json({ app: 'الحلم حقيقة', status: 'ok', database, schema, authentication: 'enabled', realtime: 'ready' });
+        const ready = database === 'connected' && schema === 'ready';
+        return json({ app: 'الحلم حقيقة', status: ready ? 'ok' : 'not_ready', database, schema, diagnostic, authentication: ready ? 'ready' : 'blocked' }, ready ? 200 : 503);
       }
       if (url.pathname.startsWith('/api/auth/')) return await handleAuth(request, env, url.pathname);
       if (url.pathname === '/api/state' && (request.method === 'GET' || request.method === 'PUT')) {
