@@ -1,32 +1,73 @@
 # الحلم حقيقة — Web Platform
 
-Cloudflare-first web platform for الحلم حقيقة.
+منصة إنتاجية عربية RTL مبنية على Cloudflare Workers وD1، مع واجهة ويب متجاوبة.
 
-## Included in this first migration baseline
-- Existing Arabic RTL application interface copied into `public/index.html`.
-- Cloudflare Worker entry point and static asset serving.
-- D1 initial schema for accounts, user state, shared projects, and study sessions.
-- Durable Object WebSocket room foundation with participant presence, shared focus phase, timer configuration, and chat events.
-- `/api/health` endpoint.
+## ما يتضمنه المشروع
 
-## Important current limitation
-Account registration/login and per-user D1 state persistence are now implemented. The browser keeps a local cache, but D1 is the source of truth after sign-in. Study room authorization, collaborative project membership, and observer invite-token authorization are still not implemented; do not expose private observer links until those layers are implemented.
+- واجهة عربية RTL تشمل الرئيسية، المهام، التقويم، المشروعات، الملاحظات، العادات، التركيز، التذكيرات، المكافآت والتحديات والإعدادات.
+- تسجيل حساب وتسجيل دخول وخروج باستخدام جلسات عشوائية مخزنة بصيغة hash في D1.
+- كلمات المرور مخزنة باستخدام PBKDF2-SHA-256 مع salt عشوائي، ولا تُخزن كنص صريح.
+- جلسة دخول لمدة 30 يومًا عبر Cookie من نوع HttpOnly وSecure وSameSite=Lax.
+- حفظ تلقائي إلى D1 بعد التعديل، مع مؤشر حالة المزامنة وإعادة المحاولة عند فشل الاتصال.
+- Cache محلي لتحسين التجربة؛ قاعدة D1 هي المصدر الأساسي بعد تسجيل الدخول.
+- Durable Object لغرف التركيز الفورية. مسارات الغرف تتطلب تسجيل الدخول، لكن صلاحيات الدعوات/المراقبين والتحقق من عضوية الغرفة ما زالت تحتاج استكمالًا قبل فتح الغرف الخاصة للعامة.
+- تصدير نسخة احتياطية من بيانات المستخدم من الواجهة.
 
-## Setup
-1. Create a GitHub repository and upload this project.
-2. Install Node.js LTS, then run `npm install`.
-3. Create D1 database: `npx wrangler d1 create el-helm-haqeqa-db`.
-4. Copy the returned database ID into `wrangler.jsonc` replacing `REPLACE_WITH_D1_DATABASE_ID`.
-5. Apply schema locally: `npx wrangler d1 migrations apply el-helm-haqeqa-db --local`.
-6. Start locally: `npm run dev`.
-7. Apply remotely: `npx wrangler d1 migrations apply el-helm-haqeqa-db --remote`.
-8. Apply the new auth/session migration remotely: `npx wrangler d1 migrations apply el-helm-haqeqa-db --remote`.
-9. Deploy: `npm run deploy`.
+## المتطلبات
 
-## API
-- `GET /api/health` — Worker and D1 health.
-- `GET /api/rooms/:roomId/status` — current in-memory room snapshot.
-- `GET /api/rooms/:roomId?name=...` with WebSocket upgrade — join realtime room. Add `role=observer` for observer view (authorization is not yet implemented; keep private until token checks are added).
+- Node.js 20 أو أحدث.
+- حساب Cloudflare.
+- مستودع GitHub إذا أردت النشر التلقائي.
 
-## Next implementation milestone
-Next: add rate limiting and account recovery, then connect Study Rooms, collaborative projects, and Observer invite-token authorization.
+## إعداد Cloudflare لأول مرة
+
+1. افتح `wrangler.jsonc` وتأكد أن `database_id` يطابق قاعدة D1 الخاصة بك. الملف الحالي يحتوي على المعرّف الذي كان موجودًا في نسخة المشروع المرفوعة؛ لا تستبدله إلا إذا أنشأت قاعدة جديدة.
+2. من مجلد المشروع شغّل:
+   ```bash
+   npm install
+   npx wrangler d1 migrations apply el-helm-haqeqa-db --remote
+   ```
+3. سجّل الدخول إلى Wrangler إذا طلب ذلك:
+   ```bash
+   npx wrangler login
+   ```
+4. انشر الموقع:
+   ```bash
+   npm run deploy
+   ```
+5. افتح رابط `workers.dev` الذي يعرضه Wrangler.
+
+## النشر التلقائي من GitHub
+
+في GitHub افتح المستودع ثم **Settings → Secrets and variables → Actions** وأضف:
+
+- `CLOUDFLARE_ACCOUNT_ID`: معرّف حساب Cloudflare.
+- `CLOUDFLARE_API_TOKEN`: API Token بصلاحية Workers Scripts: Edit وD1: Edit على الحساب الصحيح.
+
+بعدها ادفع التعديلات إلى فرع `main` أو شغّل Workflow يدويًا من تبويب Actions. الـ Workflow يطبق migrations ثم ينشر Worker.
+
+## التشغيل محليًا
+
+```bash
+npm install
+npx wrangler d1 migrations apply el-helm-haqeqa-db --local
+npm run dev
+```
+
+## فحص الخدمة
+
+- `GET /api/health` — حالة Worker واتصال D1.
+- `POST /api/auth/register` — إنشاء حساب.
+- `POST /api/auth/login` — تسجيل الدخول.
+- `GET /api/auth/me` — المستخدم الحالي.
+- `POST /api/auth/logout` — إنهاء الجلسة.
+- `GET /api/state` — تحميل بيانات المستخدم المسجل.
+- `PUT /api/state` — حفظ بيانات المستخدم المسجل.
+
+## ملاحظات مهمة قبل الإطلاق العام
+
+- لا تشارك أسرار Cloudflare أو API Tokens داخل الكود أو المستودع؛ استخدم GitHub Actions Secrets.
+- ميزة استعادة كلمة المرور عبر البريد الإلكتروني غير مفعلة بعد.
+- يلزم استكمال صلاحيات عضوية غرف الدراسة وروابط المراقبين قبل اعتبار التعاون الخاص جاهزًا للإنتاج.
+- لا توجد حتى الآن مزامنة تعاونية لحظية بين أكثر من مستخدم لنفس المهمة/المشروع؛ الحفظ الحالي خاص بكل حساب.
+- قبل فتح التسجيل العام، اختبر إنشاء حساب وتسجيل الخروج والدخول مجددًا من متصفح آخر، ثم تأكد من ظهور البيانات نفسها.

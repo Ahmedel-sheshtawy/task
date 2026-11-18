@@ -156,6 +156,8 @@ export default {
         return json({ ok: true, updatedAt: new Date().toISOString() });
       }
       if (url.pathname.startsWith('/api/rooms/')) {
+        const roomUser = await currentUser(request, env);
+        if (!roomUser) return json({ error: 'سجّلي الدخول أولًا' }, 401);
         const roomId = url.pathname.split('/')[3];
         if (!roomId || !/^[a-zA-Z0-9_-]{8,80}$/.test(roomId)) return json({ error: 'Invalid room ID' }, 400);
         const id = env.STUDY_ROOMS.idFromName(roomId);
