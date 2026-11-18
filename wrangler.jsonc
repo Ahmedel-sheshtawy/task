@@ -1,8 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "el-helm-haqeqa",
+  "name": "el-helm-haqeqa-v2",
   "main": "src/index.ts",
-  "compatibility_date": "2026-11-17",
+  "compatibility_date": "2026-11-18",
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
@@ -11,8 +11,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "el-helm-haqeqa-db",
-      "database_id": "b4a2e881-ea78-480b-a583-02f4b897c6b1",
+      "database_name": "el-helm-haqeqa-v2-prod",
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],

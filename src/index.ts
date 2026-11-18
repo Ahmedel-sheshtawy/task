@@ -31,14 +31,27 @@ function fromB64url(value: string): Uint8Array {
 async function sha256(value: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))));
 }
-async function passwordHash(password: string, salt?: Uint8Array): Promise<string> {
+async function passwordHashParts(password: string, salt?: Uint8Array): Promise<{ hash: string; salt: string }> {
   const actualSalt = salt || crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: actualSalt, iterations: PBKDF2_ITERATIONS }, key, 256);
-  return `pbkdf2$${PBKDF2_ITERATIONS}$${b64url(actualSalt)}$${b64url(new Uint8Array(bits))}`;
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: actualSalt, iterations: PBKDF2_ITERATIONS },
+    key,
+    256
+  );
+  return { hash: b64url(new Uint8Array(bits)), salt: b64url(actualSalt) };
 }
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
+async function verifyPassword(password: string, stored: string, salt?: string | null): Promise<boolean> {
   try {
+    // New format: separate salt + hash, matching the working education platform.
+    if (salt) {
+      const actual = await passwordHashParts(password, fromB64url(salt));
+      const a = fromB64url(actual.hash), b = fromB64url(stored);
+      if (a.length !== b.length) return false;
+      let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+      return diff === 0;
+    }
+    // Backward compatibility for accounts created by the previous version.
     const [kind, rounds, saltText, expected] = stored.split('$');
     if (kind !== 'pbkdf2' || !saltText || !expected) return false;
     const actual = await passwordHashWithRounds(password, fromB64url(saltText), Number(rounds));
@@ -62,6 +75,11 @@ function setSessionCookie(token: string, maxAge: number) {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 function clearSessionCookie() { return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`; }
+function originAllowed(request: Request): boolean {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true; // Non-browser clients may omit Origin; browser writes are checked.
+  try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; }
+}
 class BadRequest extends Error {}
 async function bodyJson(request: Request): Promise<any> {
   const len = Number(request.headers.get('content-length') || 0);
@@ -73,10 +91,14 @@ async function currentUser(request: Request, env: Env) {
   if (!token || token.length > 200) return null;
   const tokenHash = await sha256(token);
   const now = Math.floor(Date.now() / 1000);
-  const row = await env.DB.prepare(`SELECT u.id, u.email, u.display_name AS displayName
+  const row = await env.DB.prepare(`SELECT u.id, u.email, u.display_name AS displayName, s.id AS sessionId
     FROM auth_sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>? LIMIT 1`).bind(tokenHash, now).first<any>();
-  return row || null;
+  if (!row) return null;
+  await env.DB.prepare('UPDATE auth_sessions SET expires_at=? WHERE id=?')
+    .bind(now + SESSION_DAYS * 86400, row.sessionId).run();
+  delete row.sessionId;
+  return row;
 }
 async function createSession(userId: string, env: Env): Promise<string> {
   const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -91,43 +113,70 @@ async function handleAuth(request: Request, env: Env, path: string): Promise<Res
     const email = String(data.email || '').trim().toLowerCase();
     const password = String(data.password || '');
     const displayName = String(data.displayName || '').trim().slice(0, 80);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'أدخلي بريدًا إلكترونيًا صحيحًا' }, 400);
-    if (password.length < 8 || password.length > 128) return json({ error: 'كلمة المرور يجب أن تكون من 8 إلى 128 حرفًا' }, 400);
-    if (displayName.length < 2) return json({ error: 'اكتبي اسمًا من حرفين على الأقل' }, 400);
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return json({ error: 'أدخلي بريدًا إلكترونيًا صحيحًا' }, 400);
+    if (password.length < 8 || password.length > 128)
+      return json({ error: 'كلمة المرور يجب أن تكون من 8 إلى 128 حرفًا' }, 400);
+    if (displayName.length < 2)
+      return json({ error: 'اكتبي اسمًا من حرفين على الأقل' }, 400);
+
     const id = crypto.randomUUID();
+    const credentials = await passwordHashParts(password);
     const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
-    const expires = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
     const tokenHash = await sha256(token);
-    const hash = await passwordHash(password);
+    const expires = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
+
     try {
-      // Batch keeps account, initial state, and session creation together.
-      // A missing table or failed insert must not leave a half-created account.
+      // D1 batch is transactional: account, initial state and session are created together.
       await env.DB.batch([
-        env.DB.prepare('INSERT INTO users (id,email,display_name,password_hash) VALUES (?,?,?,?)')
-          .bind(id, email, displayName, hash),
+        env.DB.prepare('INSERT INTO users (id,email,display_name,password_hash,password_salt) VALUES (?,?,?,?,?)')
+          .bind(id, email, displayName, credentials.hash, credentials.salt),
         env.DB.prepare("INSERT INTO user_state (user_id,state_json) VALUES (?, '{}')").bind(id),
         env.DB.prepare('INSERT INTO auth_sessions (id,user_id,token_hash,expires_at) VALUES (?,?,?,?)')
           .bind(crypto.randomUUID(), id, tokenHash, expires)
       ]);
     } catch (e: any) {
       const message = String(e?.message || '').toLowerCase();
-      if (message.includes('unique')) return json({ error: 'هذا البريد مسجل بالفعل، سجّل الدخول' }, 409);
-      if (message.includes('no such table') || message.includes('has no column')) {
-        console.error('Registration database schema is not ready:', e);
-        return json({ error: 'قاعدة البيانات لم يتم تجهيز جداول التسجيل بعد. يجب تطبيق ملفات migrations على قاعدة D1 المرتبطة بالموقع.' }, 503);
-      }
-      throw e;
+      if (message.includes('unique'))
+        return json({ error: 'هذا البريد مسجل بالفعل، سجّلي الدخول' }, 409);
+      console.error('Registration transaction failed:', e);
+      return json({ error: 'تعذر إنشاء الحساب حاليًا. تحققي من إعداد قاعدة البيانات ثم حاولي مرة أخرى.' }, 500);
     }
-    return json({ user: { id, email, displayName } }, 201, { 'set-cookie': setSessionCookie(token, SESSION_DAYS * 86400) });
+
+    return json(
+      { user: { id, email, displayName } },
+      201,
+      { 'set-cookie': setSessionCookie(token, SESSION_DAYS * 86400) }
+    );
   }
+
   if (path === '/api/auth/login' && request.method === 'POST') {
     const data = await bodyJson(request);
     const email = String(data.email || '').trim().toLowerCase();
     const password = String(data.password || '');
-    const user = await env.DB.prepare('SELECT id,email,display_name AS displayName,password_hash FROM users WHERE email=? LIMIT 1').bind(email).first<any>();
-    if (!user || !(await verifyPassword(password, user.password_hash))) return json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' }, 401);
+    if (!email || !password) return json({ error: 'أدخلي البريد الإلكتروني وكلمة المرور' }, 400);
+
+    const user = await env.DB.prepare(
+      'SELECT id,email,display_name AS displayName,password_hash,password_salt FROM users WHERE lower(email)=? LIMIT 1'
+    ).bind(email).first<any>();
+
+    if (!user || !(await verifyPassword(password, user.password_hash, user.password_salt)))
+      return json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' }, 401);
+
+    // Upgrade old-format hashes after a successful login without changing the user's password.
+    if (!user.password_salt) {
+      const upgraded = await passwordHashParts(password);
+      await env.DB.prepare('UPDATE users SET password_hash=?,password_salt=? WHERE id=?')
+        .bind(upgraded.hash, upgraded.salt, user.id).run();
+    }
+
     const token = await createSession(user.id, env);
-    return json({ user: { id: user.id, email: user.email, displayName: user.displayName } }, 200, { 'set-cookie': setSessionCookie(token, SESSION_DAYS * 86400) });
+    return json(
+      { user: { id: user.id, email: user.email, displayName: user.displayName } },
+      200,
+      { 'set-cookie': setSessionCookie(token, SESSION_DAYS * 86400) }
+    );
   }
   if (path === '/api/auth/me' && request.method === 'GET') {
     const user = await currentUser(request, env);
@@ -145,16 +194,26 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !originAllowed(request))
+        return json({ error: 'مصدر الطلب غير صالح' }, 403);
       if (url.pathname === '/api/health') {
         let database = 'unavailable';
-        let missingTables: string[] = ['users', 'user_state', 'auth_sessions'];
+        let schema = 'unknown';
         try {
-          const result = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<any>();
-          const present = new Set((result.results || []).map((row: any) => row.name));
-          missingTables = ['users', 'user_state', 'auth_sessions'].filter(name => !present.has(name));
-          database = missingTables.length ? 'connected_schema_incomplete' : 'connected_ready';
-        } catch (e) { console.error('D1 health check failed:', e); }
-        return json({ app: 'الحلم حقيقة', status: 'ok', database, missingTables, authentication: 'enabled', realtime: 'ready' });
+          await env.DB.prepare('SELECT 1').first();
+          database = 'connected';
+          const [users, sessions, state] = await Promise.all([
+            env.DB.prepare('PRAGMA table_info(users)').all<any>(),
+            env.DB.prepare('PRAGMA table_info(auth_sessions)').all<any>(),
+            env.DB.prepare('PRAGMA table_info(user_state)').all<any>()
+          ]);
+          const has = (result: any, name: string) => (result.results || []).some((column: any) => column.name === name);
+          schema = has(users, 'password_salt') && has(sessions, 'token_hash') && has(state, 'state_json')
+            ? 'ready' : 'migration_required';
+        } catch (error) {
+          console.error('Health check failed:', error);
+        }
+        return json({ app: 'الحلم حقيقة', status: 'ok', database, schema, authentication: 'enabled', realtime: 'ready' });
       }
       if (url.pathname.startsWith('/api/auth/')) return await handleAuth(request, env, url.pathname);
       if (url.pathname === '/api/state' && (request.method === 'GET' || request.method === 'PUT')) {
@@ -166,6 +225,8 @@ export default {
           try { state = row?.state_json ? JSON.parse(row.state_json) : {}; } catch { state = {}; }
           return json({ state });
         }
+        if (!(request.headers.get('content-type') || '').toLowerCase().includes('application/json'))
+          return json({ error: 'يجب إرسال البيانات بصيغة JSON' }, 415);
         const data = await bodyJson(request);
         if (!data || typeof data.state !== 'object' || Array.isArray(data.state)) return json({ error: 'صيغة البيانات غير صحيحة' }, 400);
         const serialized = JSON.stringify(data.state);
@@ -176,8 +237,8 @@ export default {
         return json({ ok: true, updatedAt: new Date().toISOString() });
       }
       if (url.pathname.startsWith('/api/rooms/')) {
-        const roomUser = await currentUser(request, env);
-        if (!roomUser) return json({ error: 'سجّلي الدخول أولًا' }, 401);
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: 'سجّلي الدخول أولًا' }, 401);
         const roomId = url.pathname.split('/')[3];
         if (!roomId || !/^[a-zA-Z0-9_-]{8,80}$/.test(roomId)) return json({ error: 'Invalid room ID' }, 400);
         const id = env.STUDY_ROOMS.idFromName(roomId);

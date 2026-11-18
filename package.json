@@ -1,13 +1,16 @@
 {
-  "name": "el-helm-haqeqa",
-  "version": "1.0.0",
+  "name": "el-helm-haqeqa-v2",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "test:auth": "node tests/auth-crypto.test.mjs",
+    "check:frontend": "node --check public/app.js",
+    "test": "npm run check:frontend && npm run test:auth"
   },
   "devDependencies": {
     "typescript": "^5.8.3",
