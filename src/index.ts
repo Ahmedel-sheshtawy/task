@@ -95,15 +95,29 @@ async function handleAuth(request: Request, env: Env, path: string): Promise<Res
     if (password.length < 8 || password.length > 128) return json({ error: 'كلمة المرور يجب أن تكون من 8 إلى 128 حرفًا' }, 400);
     if (displayName.length < 2) return json({ error: 'اكتبي اسمًا من حرفين على الأقل' }, 400);
     const id = crypto.randomUUID();
+    const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    const expires = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
+    const tokenHash = await sha256(token);
+    const hash = await passwordHash(password);
     try {
-      await env.DB.prepare('INSERT INTO users (id,email,display_name,password_hash) VALUES (?,?,?,?)')
-        .bind(id, email, displayName, await passwordHash(password)).run();
+      // Batch keeps account, initial state, and session creation together.
+      // A missing table or failed insert must not leave a half-created account.
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO users (id,email,display_name,password_hash) VALUES (?,?,?,?)')
+          .bind(id, email, displayName, hash),
+        env.DB.prepare("INSERT INTO user_state (user_id,state_json) VALUES (?, '{}')").bind(id),
+        env.DB.prepare('INSERT INTO auth_sessions (id,user_id,token_hash,expires_at) VALUES (?,?,?,?)')
+          .bind(crypto.randomUUID(), id, tokenHash, expires)
+      ]);
     } catch (e: any) {
-      if (String(e?.message || '').toLowerCase().includes('unique')) return json({ error: 'هذا البريد مسجل بالفعل، سجّلي الدخول' }, 409);
+      const message = String(e?.message || '').toLowerCase();
+      if (message.includes('unique')) return json({ error: 'هذا البريد مسجل بالفعل، سجّل الدخول' }, 409);
+      if (message.includes('no such table') || message.includes('has no column')) {
+        console.error('Registration database schema is not ready:', e);
+        return json({ error: 'قاعدة البيانات لم يتم تجهيز جداول التسجيل بعد. يجب تطبيق ملفات migrations على قاعدة D1 المرتبطة بالموقع.' }, 503);
+      }
       throw e;
     }
-    await env.DB.prepare("INSERT INTO user_state (user_id,state_json) VALUES (?, '{}')").bind(id).run();
-    const token = await createSession(id, env);
     return json({ user: { id, email, displayName } }, 201, { 'set-cookie': setSessionCookie(token, SESSION_DAYS * 86400) });
   }
   if (path === '/api/auth/login' && request.method === 'POST') {
@@ -133,8 +147,14 @@ export default {
     try {
       if (url.pathname === '/api/health') {
         let database = 'unavailable';
-        try { await env.DB.prepare('SELECT 1').first(); database = 'connected'; } catch {}
-        return json({ app: 'الحلم حقيقة', status: 'ok', database, authentication: 'enabled', realtime: 'ready' });
+        let missingTables: string[] = ['users', 'user_state', 'auth_sessions'];
+        try {
+          const result = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<any>();
+          const present = new Set((result.results || []).map((row: any) => row.name));
+          missingTables = ['users', 'user_state', 'auth_sessions'].filter(name => !present.has(name));
+          database = missingTables.length ? 'connected_schema_incomplete' : 'connected_ready';
+        } catch (e) { console.error('D1 health check failed:', e); }
+        return json({ app: 'الحلم حقيقة', status: 'ok', database, missingTables, authentication: 'enabled', realtime: 'ready' });
       }
       if (url.pathname.startsWith('/api/auth/')) return await handleAuth(request, env, url.pathname);
       if (url.pathname === '/api/state' && (request.method === 'GET' || request.method === 'PUT')) {
